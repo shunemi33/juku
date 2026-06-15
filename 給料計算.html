@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="給与計算">
+    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>塾バイト給与計算アプリ</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h2 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        label {
+            font-weight: bold;
+            flex-basis: 45%;
+        }
+        input[type="number"], input[type="date"] {
+            flex-basis: 35%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .rate-hint {
+            flex-basis: 15%;
+            text-align: right;
+            font-size: 0.85em;
+            color: #666;
+        }
+        button.save-btn {
+            width: 100%;
+            padding: 12px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+        button.save-btn:hover {
+            background-color: #2980b9;
+        }
+        .total-box {
+            background-color: #e8f8f5;
+            border-left: 5px solid #1abc9c;
+            padding: 15px;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            text-align: center;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        button.delete-btn {
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        button.delete-btn:hover {
+            background-color: #c0392b;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>塾バイト給与計算アプリ</h2>
+
+    <div class="total-box" id="monthlyTotalDisplay">
+        今月の合計収益: 0円
+    </div>
+
+    <div class="card">
+        <div class="input-group">
+            <label>勤務日</label>
+            <input type="date" id="workDate">
+            <span class="rate-hint"></span>
+        </div>
+        <div class="input-group">
+            <label>個別（1人）[h]</label>
+            <input type="number" id="ind1" step="0.25" min="0" placeholder="0">
+            <span class="rate-hint">1300円/h</span>
+        </div>
+        <div class="input-group">
+            <label>個別（2人）[h]</label>
+            <input type="number" id="ind2" step="0.25" min="0" placeholder="0">
+            <span class="rate-hint">1800円/h</span>
+        </div>
+        <div class="input-group">
+            <label>グループ学習[h]</label>
+            <input type="number" id="group" step="0.25" min="0" placeholder="0">
+            <span class="rate-hint">1300円/h</span>
+        </div>
+        <div class="input-group">
+            <label>事務[h]</label>
+            <input type="number" id="admin" step="0.25" min="0" placeholder="0">
+            <span class="rate-hint">1250円/h</span>
+        </div>
+        <button class="save-btn" onclick="calculateAndSave()">記録して保存</button>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-top: 0;">勤務履歴</h3>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>日付</th>
+                        <th>個(1)</th>
+                        <th>個(2)</th>
+                        <th>集団</th>
+                        <th>事務</th>
+                        <th>日給</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 時給の設定
+        const RATES = {
+            ind1: 1300,
+            ind2: 1800,
+            group: 1300,
+            admin: 1250
+        };
+
+        // ローカルストレージからデータを読み込む
+        let records = JSON.parse(localStorage.getItem('jukuShiftRecords')) || [];
+
+        function init() {
+            // 今日の日付をデフォルトでセット
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            document.getElementById('workDate').value = `${yyyy}-${mm}-${dd}`;
+            
+            updateDisplay();
+        }
+
+        function calculateAndSave() {
+            const dateStr = document.getElementById('workDate').value;
+            if(!dateStr) {
+                alert('日付を入力してください。');
+                return;
+            }
+
+            // 入力値を取得（未入力の場合は0とする）
+            const h1 = parseFloat(document.getElementById('ind1').value) || 0;
+            const h2 = parseFloat(document.getElementById('ind2').value) || 0;
+            const hg = parseFloat(document.getElementById('group').value) || 0;
+            const ha = parseFloat(document.getElementById('admin').value) || 0;
+
+            if(h1 === 0 && h2 === 0 && hg === 0 && ha === 0) {
+                alert('少なくとも1つの勤務時間を入力してください。');
+                return;
+            }
+
+            // 日給の計算
+            const dailyTotal = (h1 * RATES.ind1) + (h2 * RATES.ind2) + (hg * RATES.group) + (ha * RATES.admin);
+
+            // データの作成
+            const record = {
+                id: Date.now(),
+                date: dateStr,
+                ind1: h1,
+                ind2: h2,
+                group: hg,
+                admin: ha,
+                total: dailyTotal
+            };
+
+            // 保存
+            records.push(record);
+            localStorage.setItem('jukuShiftRecords', JSON.stringify(records));
+
+            // 入力欄をリセット
+            document.getElementById('ind1').value = '';
+            document.getElementById('ind2').value = '';
+            document.getElementById('group').value = '';
+            document.getElementById('admin').value = '';
+
+            updateDisplay();
+        }
+
+        function updateDisplay() {
+            const tbody = document.getElementById('historyBody');
+            tbody.innerHTML = '';
+
+            let monthlySum = 0;
+            
+            // 今月の年月文字列を取得（例: "2026-06"）
+            const today = new Date();
+            const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+            // 日付の降順（新しい順）に並び替え
+            records.sort((a, b) => b.date.localeCompare(a.date));
+
+            records.forEach(r => {
+                // 今月のデータなら合計に加算
+                if (r.date.startsWith(currentMonthPrefix)) {
+                    monthlySum += r.total;
+                }
+
+                // 履歴テーブルに行を追加
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${r.date.slice(5)}</td> <td>${r.ind1 > 0 ? r.ind1 : '-'}</td>
+                    <td>${r.ind2 > 0 ? r.ind2 : '-'}</td>
+                    <td>${r.group > 0 ? r.group : '-'}</td>
+                    <td>${r.admin > 0 ? r.admin : '-'}</td>
+                    <td>¥${r.total.toLocaleString()}</td>
+                    <td><button class="delete-btn" onclick="deleteRecord(${r.id})">削</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // 今月の合計を更新
+            document.getElementById('monthlyTotalDisplay').innerText = `今月（${today.getMonth() + 1}月）の合計収益: ¥${monthlySum.toLocaleString()}`;
+        }
+
+        function deleteRecord(id) {
+            if(confirm('この記録を削除してもよろしいですか？')) {
+                records = records.filter(r => r.id !== id);
+                localStorage.setItem('jukuShiftRecords', JSON.stringify(records));
+                updateDisplay();
+            }
+        }
+
+        // ページ読み込み時に初期化
+        window.onload = init;
+    </script>
+</body>
+</html>
