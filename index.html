@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="給与計算">
-    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>塾バイト給与計算アプリ</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="給料計算">
+    <link rel="apple-touch-icon" href="icon.png">
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -20,6 +20,12 @@
         h2 {
             text-align: center;
             color: #2c3e50;
+        }
+        h3 {
+            margin-top: 0;
+            color: #34495e;
+            border-bottom: 2px solid #bdc3c7;
+            padding-bottom: 5px;
         }
         .card {
             background: #fff;
@@ -70,7 +76,7 @@
             background-color: #e8f8f5;
             border-left: 5px solid #1abc9c;
             padding: 15px;
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
             margin-bottom: 20px;
             border-radius: 4px;
@@ -99,6 +105,10 @@
         button.delete-btn:hover {
             background-color: #c0392b;
         }
+        .month-summary-row {
+            font-weight: bold;
+            background-color: #fdfefe;
+        }
     </style>
 </head>
 <body>
@@ -106,10 +116,11 @@
     <h2>塾バイト給与計算アプリ</h2>
 
     <div class="total-box" id="monthlyTotalDisplay">
-        今月の合計収益: 0円
+        現在の状況：計算中...
     </div>
 
     <div class="card">
+        <h3>シフト入力</h3>
         <div class="input-group">
             <label>勤務日</label>
             <input type="date" id="workDate">
@@ -139,12 +150,29 @@
     </div>
 
     <div class="card">
-        <h3 style="margin-top: 0;">勤務履歴</h3>
+        <h3>月別給与履歴</h3>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>給料月</th>
+                        <th>合計支給額</th>
+                    </tr>
+                </thead>
+                <tbody id="monthSummaryBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>勤務詳細履歴</h3>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
                     <tr>
                         <th>日付</th>
+                        <th>対象</th>
                         <th>個(1)</th>
                         <th>個(2)</th>
                         <th>集団</th>
@@ -160,7 +188,6 @@
     </div>
 
     <script>
-        // 時給の設定
         const RATES = {
             ind1: 1300,
             ind2: 1800,
@@ -168,11 +195,9 @@
             admin: 1250
         };
 
-        // ローカルストレージからデータを読み込む
         let records = JSON.parse(localStorage.getItem('jukuShiftRecords')) || [];
 
         function init() {
-            // 今日の日付をデフォルトでセット
             const today = new Date();
             const yyyy = today.getFullYear();
             const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -182,6 +207,24 @@
             updateDisplay();
         }
 
+        // 10日締めに基づいた「給料月」を判定する関数
+        function getSalaryMonth(dateStr) {
+            const parts = dateStr.split('-');
+            let year = parseInt(parts[0], 10);
+            let month = parseInt(parts[1], 10);
+            const day = parseInt(parts[2], 10);
+
+            // 11日以降の勤務は「翌月分の給料」になる
+            if (day >= 11) {
+                month += 1;
+                if (month > 12) {
+                    month = 1;
+                    year += 1;
+                }
+            }
+            return `${year}年${month}月分`;
+        }
+
         function calculateAndSave() {
             const dateStr = document.getElementById('workDate').value;
             if(!dateStr) {
@@ -189,21 +232,18 @@
                 return;
             }
 
-            // 入力値を取得（未入力の場合は0とする）
             const h1 = parseFloat(document.getElementById('ind1').value) || 0;
             const h2 = parseFloat(document.getElementById('ind2').value) || 0;
             const hg = parseFloat(document.getElementById('group').value) || 0;
             const ha = parseFloat(document.getElementById('admin').value) || 0;
 
             if(h1 === 0 && h2 === 0 && hg === 0 && ha === 0) {
-                alert('少なくとも1つの勤務時間を入力してください。');
+                alert('勤務時間を入力してください。');
                 return;
             }
 
-            // 日給の計算
             const dailyTotal = (h1 * RATES.ind1) + (h2 * RATES.ind2) + (hg * RATES.group) + (ha * RATES.admin);
 
-            // データの作成
             const record = {
                 id: Date.now(),
                 date: dateStr,
@@ -214,11 +254,9 @@
                 total: dailyTotal
             };
 
-            // 保存
             records.push(record);
             localStorage.setItem('jukuShiftRecords', JSON.stringify(records));
 
-            // 入力欄をリセット
             document.getElementById('ind1').value = '';
             document.getElementById('ind2').value = '';
             document.getElementById('group').value = '';
@@ -229,27 +267,32 @@
 
         function updateDisplay() {
             const tbody = document.getElementById('historyBody');
+            const monthTbody = document.getElementById('monthSummaryBody');
             tbody.innerHTML = '';
+            monthTbody.innerHTML = '';
 
-            let monthlySum = 0;
-            
-            // 今月の年月文字列を取得（例: "2026-06"）
-            const today = new Date();
-            const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+            // 月別集計用の連想配列
+            const monthlyTotals = {};
 
-            // 日付の降順（新しい順）に並び替え
+            // 日付が新しい順にソート
             records.sort((a, b) => b.date.localeCompare(a.date));
 
+            // データ集計と日ごと履歴の生成
             records.forEach(r => {
-                // 今月のデータなら合計に加算
-                if (r.date.startsWith(currentMonthPrefix)) {
-                    monthlySum += r.total;
+                const salaryMonth = getSalaryMonth(r.date);
+                
+                // 月別合計に加算
+                if (!monthlyTotals[salaryMonth]) {
+                    monthlyTotals[salaryMonth] = 0;
                 }
+                monthlyTotals[salaryMonth] += r.total;
 
-                // 履歴テーブルに行を追加
+                // 勤務詳細行
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td>${r.date.slice(5)}</td> <td>${r.ind1 > 0 ? r.ind1 : '-'}</td>
+                    <td>${r.date.slice(5)}</td>
+                    <td style="font-size:0.85em; color:#7f8c8d;">${salaryMonth.replace('分','')}</td>
+                    <td>${r.ind1 > 0 ? r.ind1 : '-'}</td>
                     <td>${r.ind2 > 0 ? r.ind2 : '-'}</td>
                     <td>${r.group > 0 ? r.group : '-'}</td>
                     <td>${r.admin > 0 ? r.admin : '-'}</td>
@@ -259,8 +302,25 @@
                 tbody.appendChild(tr);
             });
 
-            // 今月の合計を更新
-            document.getElementById('monthlyTotalDisplay').innerText = `今月（${today.getMonth() + 1}月）の合計収益: ¥${monthlySum.toLocaleString()}`;
+            // 月別給与履歴の生成（新しい月が上に来るように並び替え）
+            const sortedMonths = Object.keys(monthlyTotals).sort((a, b) => b.localeCompare(a));
+            sortedMonths.forEach(m => {
+                const tr = document.createElement('tr');
+                tr.className = 'month-summary-row';
+                tr.innerHTML = `
+                    <td>${m}</td>
+                    <td style="color: #1abc9c;">¥${monthlyTotals[m].toLocaleString()}</td>
+                `;
+                monthTbody.appendChild(tr);
+            });
+
+            // 今日の日付から「現在進行中の給料月」を特定し、トップに表示
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const currentSalaryMonth = getSalaryMonth(todayStr);
+            const currentMonthSum = monthlyTotals[currentSalaryMonth] || 0;
+
+            document.getElementById('monthlyTotalDisplay').innerText = `現在の稼ぎ状況（${currentSalaryMonth}）：¥${currentMonthSum.toLocaleString()}`;
         }
 
         function deleteRecord(id) {
@@ -271,7 +331,6 @@
             }
         }
 
-        // ページ読み込み時に初期化
         window.onload = init;
     </script>
 </body>
